@@ -5,14 +5,14 @@ import time
 from flask import Flask, render_template, Response
 
 app = Flask(__name__,
-            static_url_path='/')  # 设置静态文件路径（我不准备用模板，所以HTML也是放在static文件夹中）
-  # 初始化摄像头
+            static_url_path='/')
 #camera = cv2.VideoCapture(0)
 
 
 
 @app.route('/')
 def index():
+    #return 1
     return app.send_static_file('index.html')
 
 
@@ -20,7 +20,12 @@ def index():
 @app.before_first_request
 def init_cam():
     global camera
+    #CAM_WIDTH, CAM_HEIGHT = 640, 480  #cali not working
+    #CAM_WIDTH, CAM_HEIGHT = 1280, 720  #cali not working
+    CAM_WIDTH, CAM_HEIGHT = 1920, 1080
     camera = cv2.VideoCapture(1)
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)  # set new dimensionns to cam object (not cap)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
     print("cam ready")
 
 
@@ -31,7 +36,7 @@ def gen(camera):
     while True:
         ret, frame = camera.read()
         try:
-            frame = cv2.imencode('.jpg', frame)[1].tobytes()  # opencv存储的图片数据不能用，所以需要进行转码
+            frame = cv2.imencode('.jpg', frame)[1].tobytes()
         except:
             camera.release()
             cv2.destroyAllWindows()
