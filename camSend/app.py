@@ -24,8 +24,8 @@ def init_cam():
     #CAM_WIDTH, CAM_HEIGHT = 1280, 720  #cali not working
     CAM_WIDTH, CAM_HEIGHT = 1920, 1080
     camera = cv2.VideoCapture(1)
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)  # set new dimensionns to cam object (not cap)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+    #camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)  # set new dimensionns to cam object (not cap)
+    #amera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
     print("cam ready")
 
 

@@ -293,7 +293,10 @@ class LoadStreams:  # multiple IP or RTSP cameras
                 check_requirements(('pafy', 'youtube_dl'))
                 import pafy
                 url = pafy.new(url).getbest(preftype="mp4").url
-            cap = HttpCamera('http://127.0.0.1:5000/video_feed')
+            cap = HttpCamera('http://sheeped01.ddns.net:6796/video_feed')
+            #cap = HttpCamera('http://192.168.0.170:5000/video_feed')
+            cap.waitUntilReady()
+            cap.read()
             assert cap.isOpened(), f'Failed to open {s}'
             w = int(cap.getW())
             h = int(cap.getH())
@@ -316,7 +319,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
     def update(self, index, cap):
         # Read next stream frame in a daemon thread
         n = 0
-        while cap.isOpened():
+        while True:
             n += 1
             # _, self.imgs[index] = cap.read()
             cap.read()
@@ -325,6 +328,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
                 self.imgs[index] = im if success else self.imgs[index] * 0
                 n = 0
             time.sleep(1 / self.fps)  # wait time
+
 
     def __iter__(self):
         self.count = -1
