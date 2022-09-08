@@ -293,7 +293,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
                 check_requirements(('pafy', 'youtube_dl'))
                 import pafy
                 url = pafy.new(url).getbest(preftype="mp4").url
-            cap = HttpCamera('http://sheeped01.ddns.net:6796/video_feed')
+            cap = HttpCamera('http://sheeped01.ddns.net:6790/video_feed')
             #cap = HttpCamera('http://192.168.0.170:5000/video_feed')
             cap.waitUntilReady()
             cap.read()

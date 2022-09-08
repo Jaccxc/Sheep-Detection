@@ -4,7 +4,7 @@ A Moduele which binds Yolov7 repo with Deepsort with modifications
 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # comment out below line to enable tensorflow logging outputs
-import time
+import time, datetime
 import tensorflow as tf
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -29,10 +29,32 @@ from deep_sort.tracker import Tracker
 from tracking_helpers import read_class_names, create_box_encoder
 from detection_helpers import *
 
+from pathlib import Path
+from utils.general import custom_increment_path
+from utils.sql_helper import sql_save
+
 
 # load configuration for object detector
 config = ConfigProto()
 config.gpu_options.allow_growth = True
+
+class Goat_Tracking_Info:
+    def __init__(self, log_time, track_id, img_id):
+        self.log_time = log_time
+        self.id = track_id
+        self.img_id = img_id
+        self.duration = None
+
+    def end_tracking_time(self):
+        end = datetime.datetime.now()
+        self.duration = end - self.log_time
+
+    def __hash__(self):
+        return hash((self.id))
+    
+    def __eq__(self, other):
+        if not isinstance(other, type(self)): return NotImplemented
+        return self.id == other.id
 
 
 
@@ -65,6 +87,11 @@ class YOLOv7_DeepSORT:
         self.encoder = create_box_encoder(reID_model_path, batch_size=1)
         metric = nn_matching.NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget) # calculate cosine distance metric
         self.tracker = Tracker(metric) # initialize tracker
+
+        #utilizing tracking info
+        self.goat_tracking_set_curr = set()
+        self.goat_tracking_set_prev = set()
+        self.img_id = -1
 
 
     def track_video(self,video:str, output:str, skip_frames:int=0, show_live:bool=False, count_objects:bool=False, verbose:int = 0):
@@ -150,21 +177,90 @@ class YOLOv7_DeepSORT:
             self.tracker.predict()  # Call the tracker
             self.tracker.update(detections) #  updtate using Kalman Gain
 
+            self.goat_tracking_set_curr = set()
             for track in self.tracker.tracks:  # update new findings AKA tracks
                 if not track.is_confirmed() or track.time_since_update > 1:
                     continue 
                 bbox = track.to_tlbr()
-                class_name = track.get_class()
+                #class_name = track.get_class()
+                class_name = 'goat'
         
-                color = colors[int(track.track_id) % len(colors)]  # draw bbox on screen
-                color = [i * 255 for i in color]
-                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
-                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1]-30)), (int(bbox[0])+(len(class_name)+len(str(track.track_id)))*17, int(bbox[1])), color, -1)
-                cv2.putText(frame, class_name + " : " + str(track.track_id),(int(bbox[0]), int(bbox[1]-11)),0, 0.6, (255,255,255),1, lineType=cv2.LINE_AA)    
+                #color = colors[int(track.track_id) % len(colors)]  # draw bbox on screen
+                #color = [i * 255 for i in color]
+                green = [199, 252, 0]
+                red = [251, 111, 146]
+                yellow = [241, 221, 2]
+                color = green
+                
+                boundary = 250 
+                
+                cv2.rectangle(frame, (0, 0), (boundary, 480), yellow, 1)
+                is_in_bound = False
+
+                if bbox[0] < boundary:
+                    color = red
+                    is_in_bound = True
+                
+                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 1)
+                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1]-20)), (int(bbox[0])+(len(class_name)+len(str(track.track_id)))*13, int(bbox[1])), color, -1)
+                cv2.putText(frame, class_name + " : " + str(track.track_id),(int(bbox[0]+2), int(bbox[1]-7)),0, 0.4, (20 ,20 , 20),1, lineType=cv2.LINE_AA)    
 
                 if verbose == 2:
                     print("Tracker ID: {}, Class: {},  BBox Coords (xmin, ymin, xmax, ymax): {}".format(str(track.track_id), class_name, (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))))
-                    
+
+                # ---------------------------------- Start goat logging -------------------------------------------------------------------------
+                curr_img_id = -1
+                curr_time = datetime.datetime.now()
+
+                if is_in_bound == False:
+                    continue
+
+                for goat in self.goat_tracking_set_prev:
+                    if goat.img_id != -1 and goat.id == track.track_id:
+                        curr_img_id = goat.img_id
+                        curr_time = goat.log_time
+
+                goat_info = Goat_Tracking_Info(curr_time, track.track_id, curr_img_id)
+                self.goat_tracking_set_curr.add(goat_info)
+
+
+            new_goats = self.goat_tracking_set_curr - self.goat_tracking_set_prev
+            missing_goats = self.goat_tracking_set_prev - self.goat_tracking_set_curr
+            
+
+            if new_goats != set():
+                if self.img_id is -1:
+                    self.img_id = custom_increment_path(Path("goat/image"), sep=' ') # increment run
+                else:
+                    self.img_id += 1
+
+                save_dir = f"goat/image {self.img_id}"
+                save_path = str(save_dir) + ".jpg"
+
+                print(f"{len(new_goats)} new objects detected, img id {self.img_id} with track id:")
+
+                cv2.imwrite(save_path, frame)
+
+                '''
+                for case in self.goat_tracking_set_prev:
+                    print(f'we have : {case.id}, {case.log_time}, {case.img_id}, {case.duration}')
+                '''
+                for case in new_goats:
+                    case.img_id = self.img_id
+                    self.goat_tracking_set_prev.add(case)
+                    #print(f"we newly received: {case.id}, {case.log_time}, {case.img_id}, {case.duration}")
+                
+
+            if missing_goats != set():
+                print(f"{len(missing_goats)} objects missing, with IDs:")
+                for case in missing_goats:
+                    self.goat_tracking_set_prev.remove(case)
+                    case.end_tracking_time()
+                    sql_save(case.log_time, case.id, case.duration, case.img_id)
+                    print(f"track id: {case.id}, first shown img id: {case.img_id}")
+                
+
+
             # -------------------------------- Tracker work ENDS here -----------------------------------------------------------------------
             if verbose >= 1:
                 fps = 1.0 / (time.time() - start_time) # calculate frames per second of running detections
@@ -174,7 +270,9 @@ class YOLOv7_DeepSORT:
             result = np.asarray(frame)
             result = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
-            if output: out.write(result) # save output video
+            if output: 
+                out.write(result) # save output video
+
 
             if show_live:
                 cv2.imshow("Output Video", result)
