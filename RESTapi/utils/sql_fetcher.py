@@ -8,5 +8,3 @@ def getTopNFromDate(topN, date):
     cursor.close()
     
     return data
-
-getTopNFromDate(40, "2022/09/05")
