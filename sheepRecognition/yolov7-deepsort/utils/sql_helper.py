@@ -14,8 +14,8 @@ def sql_save(logTime, trackID, duration, imgID):
 
     logTime = logTime.strftime("%Y/%m/%d, %H:%M:%S")
     logDuration = str(duration)
-    cursorObj.execute('create table if not exists TRACKER5(T_ID INTEGER PRIMARY KEY AUTOINCREMENT, LOG_TIME TEXT, ID INT , DURATION TEXT , IMG_ID INT)')
-    cursorObj.execute(f"INSERT INTO TRACKER5 VALUES(null, '{logTime}', {trackID}, '{logDuration}', {imgID})")
+    cursorObj.execute('create table if not exists tracker(T_ID INTEGER PRIMARY KEY AUTOINCREMENT, LOG_TIME TEXT, ID INT , DURATION TEXT , IMG_ID INT)')
+    cursorObj.execute(f"INSERT INTO tracker VALUES(null, '{logTime}', {trackID}, '{logDuration}', {imgID})")
     con.commit()
     con.close()
 
