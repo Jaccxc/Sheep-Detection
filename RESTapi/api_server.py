@@ -1,6 +1,6 @@
 from flask import Flask, request, send_file
 from flask_cors import CORS
-from utils.sql_fetcher import getTopNFromDate
+from utils.sql_fetcher import getTopNFromDate, getAccumFromTopN
 from utils.dataToJson import trackerToJson
 
 app = Flask(__name__)
@@ -10,8 +10,9 @@ CORS(app)
 def getTopNFromDateAPI():
     topN = request.args.get('N')
     date = request.args.get('date')
-    raw_data = getTopNFromDate(topN, date)
-    json_response = trackerToJson(raw_data)
+    raw_topN_data = getTopNFromDate(topN, date)
+    dict_accum_data = getAccumFromTopN(raw_topN_data)
+    json_response = trackerToJson(raw_topN_data, dict_accum_data)
     return json_response
 
 @app.route('/getImage', methods=['GET'])
