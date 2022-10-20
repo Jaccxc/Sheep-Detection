@@ -2,9 +2,17 @@
 traced_model.pt
 ./weights/yolov7x.pt
 /weights/yolov7x.pt
+sheepRecognition/yolov7-deepsort/goat/**/*
+sheepRecognition/yolov7-deepsort/IO_data/**/*
 sheepRecognition/yolov7-deepsort/yolov7.pt
+sheepRecognition/yolov7-deepsort/best.pt
 sheepRecognition/yolov7-deepsort/traced_model.pt
 sheepRecognition/yolov7-main/yolov7.pt
 sheepRecognition/yolov7-main/traced_model.pt
+sheepRecognition/yolov7-main/best.pt
+sheepRecognition/yolov7-main/IO_data/**/*
+sheepRecognition/yolov7-main/runs/**/*
 sheepRecognition/yolov7-deepsort/Demo.ipynb
 sheepRecognition/yolov7-deepsort/.ipynb_checkpoints/Demo-checkpoint.ipynb
+sheepRecognition/yolov7-deepsort/goatTracking.db
+**/__pycache__/*

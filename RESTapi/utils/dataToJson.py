@@ -18,6 +18,9 @@ def trackerToJson(raw_topN_data, dict_accum_data):
         dateDict['year'] = dateString[0:4]
         dateDict['month'] = dateString[5:7]
         dateDict['day'] = dateString[8:10]
+        dateDict['hour'] = dateString[12:14]
+        dateDict['minute'] = dateString[15:17]
+        dateDict['second'] = dateString[18:20]
 
         timeStringList = timeString.split(':')
 

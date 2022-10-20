@@ -39,15 +39,16 @@ config = ConfigProto()
 config.gpu_options.allow_growth = True
 
 class Goat_Tracking_Info:
-    def __init__(self, log_time, track_id, img_id):
+    def __init__(self, log_time, track_id, img_id, start_frame, img):
         self.log_time = log_time
         self.id = track_id
         self.img_id = img_id
         self.duration = None
+        self.start_frame = start_frame
+        self.img = img
 
-    def end_tracking_time(self):
-        end = datetime.datetime.now()
-        self.duration = end - self.log_time
+    def end_tracking_time(self, frame_num):
+        self.duration = datetime.timedelta(milliseconds=(200*(frame_num - self.start_frame)))
 
     def __hash__(self):
         return hash((self.id))
@@ -92,6 +93,10 @@ class YOLOv7_DeepSORT:
         self.goat_tracking_set_curr = set()
         self.goat_tracking_set_prev = set()
         self.img_id = -1
+        self.last_frame = []
+        self.thresh = datetime.timedelta(seconds = 7)
+        self.imageFolderPath = '/media/server-goat/GoatData/goatImages'
+        self.ended = False
 
 
     def track_video(self,video:str, output:str, skip_frames:int=0, show_live:bool=False, count_objects:bool=False, verbose:int = 0):
@@ -119,11 +124,13 @@ class YOLOv7_DeepSORT:
             out = cv2.VideoWriter(output, codec, fps, (width, height))
 
         frame_num = 0
+        self.ended = False
         while True: # while video is running
             return_value, frame = vid.read()
             if not return_value:
                 print('Video has ended or failed!')
-                break
+                frame = np.zeros((640,480,3)).astype(np.float32)
+                self.ended = True
             frame_num +=1
 
             if skip_frames and not frame_num % skip_frames: continue # skip every nth frame. When every frame is not important, you can use this to fasten the process
@@ -178,6 +185,7 @@ class YOLOv7_DeepSORT:
             self.tracker.update(detections) #  updtate using Kalman Gain
 
             self.goat_tracking_set_curr = set()
+            original_frame = frame.copy()
             for track in self.tracker.tracks:  # update new findings AKA tracks
                 if not track.is_confirmed() or track.time_since_update > 1:
                     continue 
@@ -193,24 +201,38 @@ class YOLOv7_DeepSORT:
                 color = green
                 
                 boundary = 250 
-                
-                cv2.rectangle(frame, (0, 0), (boundary, 480), yellow, 1)
+                points = np.array([[130, 40], [250, 40], [250, 480], [0, 480], [0, 170], [130, 170]], np.int32)
+                cv2.polylines(frame, [points], True, yellow, 1)
                 is_in_bound = False
 
                 if bbox[0] < boundary:
-                    color = red
-                    is_in_bound = True
+                    if bbox[0] > 130:
+                        if bbox[1] > 40:
+                            color = red
+                            is_in_bound = True
+                    else:
+                        if bbox[1] > 170:
+                            color = red
+                            is_in_bound = True
+                        
+                            
                 
                 cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 1)
                 cv2.rectangle(frame, (int(bbox[0]), int(bbox[1]-20)), (int(bbox[0])+(len(class_name)+len(str(track.track_id)))*13, int(bbox[1])), color, -1)
                 cv2.putText(frame, class_name + " : " + str(track.track_id),(int(bbox[0]+2), int(bbox[1]-7)),0, 0.4, (20 ,20 , 20),1, lineType=cv2.LINE_AA)    
 
+                curr_track_BBox_frame = original_frame.copy()
+                cv2.rectangle(curr_track_BBox_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 1)
+                cv2.rectangle(curr_track_BBox_frame, (int(bbox[0]), int(bbox[1]-20)), (int(bbox[0])+(len(class_name)+len(str(track.track_id)))*13, int(bbox[1])), color, -1)
+                cv2.putText(curr_track_BBox_frame, class_name + " : " + str(track.track_id),(int(bbox[0]+2), int(bbox[1]-7)),0, 0.4, (20 ,20 , 20),1, lineType=cv2.LINE_AA)   
+                
                 if verbose == 2:
                     print("Tracker ID: {}, Class: {},  BBox Coords (xmin, ymin, xmax, ymax): {}".format(str(track.track_id), class_name, (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))))
 
                 # ---------------------------------- Start goat logging -------------------------------------------------------------------------
                 curr_img_id = -1
                 curr_time = datetime.datetime.now()
+                curr_start_frame = frame_num
 
                 if is_in_bound == False:
                     continue
@@ -219,8 +241,10 @@ class YOLOv7_DeepSORT:
                     if goat.img_id != -1 and goat.id == track.track_id:
                         curr_img_id = goat.img_id
                         curr_time = goat.log_time
-
-                goat_info = Goat_Tracking_Info(curr_time, track.track_id, curr_img_id)
+                        curr_start_frame = goat.start_frame
+                        curr_track_BBox_frame = goat.curr_track_BBox_frame
+ 
+                goat_info = Goat_Tracking_Info(curr_time, track.track_id, curr_img_id, curr_start_frame, curr_track_BBox_frame)
                 self.goat_tracking_set_curr.add(goat_info)
 
 
@@ -229,46 +253,52 @@ class YOLOv7_DeepSORT:
             
 
             if new_goats != set():
-                if self.img_id is -1:
-                    self.img_id = custom_increment_path(Path("goat/image"), sep=' ') # increment run
-                else:
-                    self.img_id += 1
-
-                save_dir = f"goat/image {self.img_id}"
-                save_path = str(save_dir) + ".jpg"
-
                 print(f"{len(new_goats)} new objects detected, img id {self.img_id} with track id:")
 
-                cv2.imwrite(save_path, frame)
-
-                '''
-                for case in self.goat_tracking_set_prev:
-                    print(f'we have : {case.id}, {case.log_time}, {case.img_id}, {case.duration}')
-                '''
                 for case in new_goats:
-                    case.img_id = self.img_id
                     self.goat_tracking_set_prev.add(case)
-                    #print(f"we newly received: {case.id}, {case.log_time}, {case.img_id}, {case.duration}")
                 
 
             if missing_goats != set():
-                print(f"{len(missing_goats)} objects missing, with IDs:")
+
+                saved = False   
+
                 for case in missing_goats:
                     self.goat_tracking_set_prev.remove(case)
-                    case.end_tracking_time()
+                    case.end_tracking_time(frame_num)
+
+                    if case.duration < self.thresh:
+                        continue
+
+                    if saved == False: 
+                        if self.img_id is -1:
+                            self.img_id = custom_increment_path(Path(self.imageFolderPath + '/image'), sep=' ') # increment run
+                        else:
+                            self.img_id += 1
+                        saved = True
+                        
+                    case.img_id = self.img_id
+
+                    save_dir = self.imageFolderPath + f"/image {self.img_id}"
+                    save_path = str(save_dir) + ".jpg"
+                    cv2.imwrite(save_path, case.img)
+                    
                     sql_save(case.log_time, case.id, case.duration, case.img_id)
                     print(f"track id: {case.id}, first shown img id: {case.img_id}")
                 
-
+            self.last_frame = frame
 
             # -------------------------------- Tracker work ENDS here -----------------------------------------------------------------------
             if verbose >= 1:
                 fps = 1.0 / (time.time() - start_time) # calculate frames per second of running detections
                 if not count_objects: print(f"Processed frame no: {frame_num} || Current FPS: {round(fps,2)}")
                 else: print(f"Processed frame no: {frame_num} || Current FPS: {round(fps,2)} || Objects tracked: {count}")
-            
+
             result = np.asarray(frame)
             result = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            if self.ended == True:
+                break
             
             if output: 
                 out.write(result) # save output video
@@ -277,5 +307,6 @@ class YOLOv7_DeepSORT:
             if show_live:
                 cv2.imshow("Output Video", result)
                 if cv2.waitKey(1) & 0xFF == ord('q'): break
+
         
         cv2.destroyAllWindows()
