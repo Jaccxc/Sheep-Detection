@@ -33,6 +33,8 @@ from pathlib import Path
 from utils.general import custom_increment_path
 from utils.sql_helper import sql_save
 
+from utils.camRecieve.client import HttpCamera
+
 
 # load configuration for object detector
 config = ConfigProto()
@@ -47,8 +49,9 @@ class Goat_Tracking_Info:
         self.start_frame = start_frame
         self.img = img
 
-    def end_tracking_time(self, frame_num):
-        self.duration = datetime.timedelta(milliseconds=(200*(frame_num - self.start_frame)))
+    def end_tracking_time(self):
+        #self.duration = datetime.timedelta(milliseconds=(200*(frame_num - self.start_frame)))
+        self.duration = datetime.datetime.now() - self.log_time
 
     def __hash__(self):
         return hash((self.id))
@@ -63,7 +66,7 @@ class YOLOv7_DeepSORT:
     '''
     Class to Wrap ANY detector  of YOLO type with DeepSORT
     '''
-    def __init__(self, reID_model_path:str, detector, max_cosine_distance:float=0.4, nn_budget:float=None, nms_max_overlap:float=1.0,
+    def __init__(self, reID_model_path:str, detector, max_cosine_distance:float=0.7, nn_budget:float=None, nms_max_overlap:float=1.0,
     coco_names_path:str ="./io_data/input/classes/coco.names",  ):
         '''
         args: 
@@ -95,11 +98,21 @@ class YOLOv7_DeepSORT:
         self.img_id = -1
         self.last_frame = []
         self.thresh = datetime.timedelta(seconds = 7)
-        self.imageFolderPath = '/media/server-goat/GoatData/goatImages'
+        self.imageFolderPath = '/mnt/sda/goatData/images'
+        self.videoResultPath = '/mnt/sda/goatData/videos'
         self.ended = False
 
+        self.w = 0
+        self.h = 0
+        self.fps = 0
+        self.out = None
+        self.lastVideoSave = 0
+        self.videoLength = 300
 
-    def track_video(self,video:str, output:str, skip_frames:int=0, show_live:bool=False, count_objects:bool=False, verbose:int = 0):
+        
+
+
+    def track_video(self,video:str='', output:bool=True, skip_frames:int=0, show_live:bool=False, count_objects:bool=False, verbose:int = 0):
         '''
         Track any given webcam or video
         args: 
@@ -109,24 +122,38 @@ class YOLOv7_DeepSORT:
             show_live: Whether to show live video tracking. Press the key 'q' to quit
             count_objects: count objects being tracked on screen
             verbose: print details on the screen allowed values 0,1,2
-        '''
+        
         try: # begin video capture
             vid = cv2.VideoCapture(int(video))
         except:
             vid = cv2.VideoCapture(video)
+        '''
+        cap = HttpCamera('http://sheeped01.ddns.net:6791/video_feed')
+        cap.waitUntilReady()
+        cap.read()
+        assert cap.isOpened(), f'Failed to open HttpCam'
 
-        out = None
         if output: # get video ready to save locally if flag is set
-            width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))  # by default VideoCapture returns float instead of int
-            height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = int(vid.get(cv2.CAP_PROP_FPS))
-            codec = cv2.VideoWriter_fourcc(*"XVID")
-            out = cv2.VideoWriter(output, codec, fps, (width, height))
+            width = int(cap.getW())  # by default VideoCapture returns float instead of int
+            height = int(cap.getH())
+            fps = int(cap.getFPS())
+            self.w = width
+            self.h = height
+            self.fps = fps
+            self.lastVideoSave = datetime.datetime.now()
+            codec_result = cv2.VideoWriter_fourcc(*"mp4v")
+            codec_raw = cv2.VideoWriter_fourcc(*"mp4v")
+            filename_result = self.lastVideoSave.strftime("result%Y%m%d-%H%M.mp4")
+            filename_raw = self.lastVideoSave.strftime("raw%Y%m%d-%H%M.mp4")
+            self.out_raw = cv2.VideoWriter(self.videoResultPath+f'/{filename_raw}', codec_raw, fps, (width, height))
+            self.out_result = cv2.VideoWriter(self.videoResultPath+f'/{filename_result}', codec_result, fps, (width, height))
 
         frame_num = 0
         self.ended = False
         while True: # while video is running
-            return_value, frame = vid.read()
+            if verbose >= 1:start_time = time.time()
+
+            return_value, frame = cap.read()
             if not return_value:
                 print('Video has ended or failed!')
                 frame = np.zeros((640,480,3)).astype(np.float32)
@@ -134,9 +161,10 @@ class YOLOv7_DeepSORT:
             frame_num +=1
 
             if skip_frames and not frame_num % skip_frames: continue # skip every nth frame. When every frame is not important, you can use this to fasten the process
-            if verbose >= 1:start_time = time.time()
-
+            
             # -----------------------------------------PUT ANY DETECTION MODEL HERE -----------------------------------------------------------------
+            seg_before_detect_time = time.time()
+
             yolo_dets = self.detector.detect(frame.copy(), plot_bb = False)  # Get the detections
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -155,7 +183,8 @@ class YOLOv7_DeepSORT:
                 classes = yolo_dets[:,-1]
                 num_objects = bboxes.shape[0]
             # ---------------------------------------- DETECTION PART COMPLETED ---------------------------------------------------------------------
-            
+            seg_before_track_time = time.time()
+
             names = []
             for i in range(num_objects): # loop through objects and use class index to get class name
                 class_indx = int(classes[i])
@@ -184,7 +213,10 @@ class YOLOv7_DeepSORT:
             self.tracker.predict()  # Call the tracker
             self.tracker.update(detections) #  updtate using Kalman Gain
 
+            seg_before_track_proc_time = time.time()
+
             self.goat_tracking_set_curr = set()
+            curr_time = datetime.datetime.now()
             original_frame = frame.copy()
             for track in self.tracker.tracks:  # update new findings AKA tracks
                 if not track.is_confirmed() or track.time_since_update > 1:
@@ -231,7 +263,6 @@ class YOLOv7_DeepSORT:
 
                 # ---------------------------------- Start goat logging -------------------------------------------------------------------------
                 curr_img_id = -1
-                curr_time = datetime.datetime.now()
                 curr_start_frame = frame_num
 
                 if is_in_bound == False:
@@ -247,13 +278,14 @@ class YOLOv7_DeepSORT:
                 goat_info = Goat_Tracking_Info(curr_time, track.track_id, curr_img_id, curr_start_frame, curr_track_BBox_frame)
                 self.goat_tracking_set_curr.add(goat_info)
 
+            seg_before_logging_time = time.time()
 
             new_goats = self.goat_tracking_set_curr - self.goat_tracking_set_prev
             missing_goats = self.goat_tracking_set_prev - self.goat_tracking_set_curr
             
 
             if new_goats != set():
-                print(f"{len(new_goats)} new objects detected, img id {self.img_id} with track id:")
+                print(f"{len(new_goats)} new objects detected")
 
                 for case in new_goats:
                     self.goat_tracking_set_prev.add(case)
@@ -265,7 +297,7 @@ class YOLOv7_DeepSORT:
 
                 for case in missing_goats:
                     self.goat_tracking_set_prev.remove(case)
-                    case.end_tracking_time(frame_num)
+                    case.end_tracking_time()
 
                     if case.duration < self.thresh:
                         continue
@@ -284,29 +316,61 @@ class YOLOv7_DeepSORT:
                     cv2.imwrite(save_path, case.img)
                     
                     sql_save(case.log_time, case.id, case.duration, case.img_id)
-                    print(f"track id: {case.id}, first shown img id: {case.img_id}")
+                    print(f"Data saved, track id: {case.id}, first shown img id: {case.img_id}")
                 
             self.last_frame = frame
 
             # -------------------------------- Tracker work ENDS here -----------------------------------------------------------------------
+            seg_before_output_time = time.time()
+
             if verbose >= 1:
                 fps = 1.0 / (time.time() - start_time) # calculate frames per second of running detections
                 if not count_objects: print(f"Processed frame no: {frame_num} || Current FPS: {round(fps,2)}")
                 else: print(f"Processed frame no: {frame_num} || Current FPS: {round(fps,2)} || Objects tracked: {count}")
 
-            result = np.asarray(frame)
+            #origin = np.asarray(original_frame)
+            origin = cv2.cvtColor(original_frame, cv2.COLOR_RGB2BGR)
+
+            #result = np.asarray(frame)
             result = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
             if self.ended == True:
                 break
             
             if output: 
-                out.write(result) # save output video
-
+                self.out_result.write(result) # save output video
+                self.out_raw.write(origin)
 
             if show_live:
                 cv2.imshow("Output Video", result)
                 if cv2.waitKey(1) & 0xFF == ord('q'): break
 
+
+            if (curr_time - self.lastVideoSave).total_seconds() > self.videoLength:
+                self.out_raw.release()
+                self.out_result.release()
+                self.lastVideoSave = curr_time
+                codec_raw = cv2.VideoWriter_fourcc(*"mp4v")
+                codec_result = cv2.VideoWriter_fourcc(*"mp4v")
+                filename_raw = datetime.datetime.now().strftime("raw%Y%m%d-%H%M.mp4")
+                filename_result = datetime.datetime.now().strftime("result%Y%m%d-%H%M.mp4")
+                self.out_raw = cv2.VideoWriter(self.videoResultPath+f'/{filename_raw}', codec_raw, self.fps, (self.w, self.h))
+                self.out_result = cv2.VideoWriter(self.videoResultPath+f'/{filename_result}', codec_result, self.fps, (self.w, self.h))
+
+            seg_final_time = time.time()
+
+            l1 = 100.0 * (start_time - seg_before_detect_time) / (start_time - seg_final_time)
+            l2 = 100.0 * (seg_before_detect_time - seg_before_track_time) / (start_time - seg_final_time)
+            l3 = 100.0 * (seg_before_track_time - seg_before_track_proc_time) / (start_time - seg_final_time)
+            l4 = 100.0 * (seg_before_track_proc_time - seg_before_logging_time) / (start_time - seg_final_time)
+            l5 = 100.0 * (seg_before_logging_time - seg_before_output_time) / (start_time - seg_final_time)
+            l6 = 100.0 * (seg_before_output_time - seg_final_time) / (start_time - seg_final_time)
+
+            print(f'Before detect time {l1:.1f}%')
+            print(f'Detect time        {l2:.1f}%')
+            print(f'Tracking time      {l3:.1f}%')
+            print(f'Processing time    {l4:.1f}%')
+            print(f'Goat logging time  {l5:.1f}%')
+            print(f'Output time        {l6:.1f}%')
         
         cv2.destroyAllWindows()

@@ -18,7 +18,7 @@ def getTopNFromDateAPI():
 
 @app.route('/getImage', methods=['GET'])
 def getImageAPI():
-    base = '/media/server-goat/GoatData/goatImages/image '
+    base = '/mnt/sda/goatData/images/image '
     img_id = request.args.get('IMG_ID')
     return send_file(base+img_id+'.jpg', mimetype='image/jpg')
 
